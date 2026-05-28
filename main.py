@@ -7,7 +7,7 @@ CONNECTION = "/dev/serial0"
 BAUD = 57600
 
 MOTOR_NUMBER = 1
-THROTTLE_PERCENT = 100
+THROTTLE_PWM = 2000
 DURATION_SECONDS = 3
 
 
@@ -59,7 +59,7 @@ def main():
     print("- vehicle is disarmed")
     time.sleep(2)
 
-    print(f"Sending motor test: motor {MOTOR_NUMBER}, {THROTTLE_PERCENT}%, {DURATION_SECONDS}s")
+    print(f"Sending motor test: motor {MOTOR_NUMBER}, {THROTTLE_PWM}us, {DURATION_SECONDS}s")
 
     command = mavutil.mavlink.MAV_CMD_DO_MOTOR_TEST
 
@@ -69,8 +69,8 @@ def main():
         command,
         0,
         MOTOR_NUMBER,          # motor number: 1, 2, 3, 4
-        0,                     # throttle type: 0 = percent
-        THROTTLE_PERCENT,      # throttle percentage
+        1,                     # throttle type: 1 = PWM in microseconds
+        THROTTLE_PWM,          # PWM value to output
         DURATION_SECONDS,      # duration
         0,                     # motor count, 0 = one motor
         0,
