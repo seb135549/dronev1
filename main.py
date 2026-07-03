@@ -6,10 +6,6 @@ import time
 CONNECTION = "/dev/serial0"
 BAUD = 57600
 
-MOTOR_NUMBER = 1
-THROTTLE_PWM = 2000
-DURATION_SECONDS = 3
-
 
 def wait_for_ack(master, command, timeout=5):
     start = time.time()
@@ -33,6 +29,56 @@ def wait_for_ack(master, command, timeout=5):
     print("No COMMAND_ACK received.")
     return None
 
+def wait_until_armed(master):
+    print("Waiting for vehicle to arm...")
+
+    while True:
+        msg = master.recv_match(type="HEARTBEAT", blocking=True)
+
+        if msg is None:
+            continue
+
+        if msg.base_mode & mavutil.mavlink.MAV_MODE_FLAG_SAFETY_ARMED:
+            print("Vehicle is armed.")
+            return
+
+        time.sleep(0.1)
+
+def wait_until_mode(master, mode):
+    print(f"Waiting for vehicle to enter {mode} mode...")
+
+    while True:
+        msg = master.recv_match(type="HEARTBEAT", blocking=True)
+
+        if msg is None:
+            continue
+
+        current_mode = mavutil.mode_string_v10(msg)
+
+        if current_mode == mode:
+            print(f"Vehicle is in {mode} mode.")
+            return
+
+        time.sleep(0.1)
+
+def wait_for_takeoff(master, target_altitude, tolerance=0.5):
+    while True:
+
+        msg = master.recv_match(
+            type="GLOBAL_POSITION_INT",
+            blocking=True
+        )
+
+        altitude = msg.relative_alt / 1000.0
+
+        print(f"{altitude:.2f} m")
+
+        if altitude >= target_altitude * 0.95: #if withing 5% of target altitude, consider takeoff complete
+            print("Takeoff complete")
+            break
+
+        time.sleep(0.1)
+
 
 def main():
     print("Connecting to Pixhawk...")
@@ -44,6 +90,7 @@ def main():
     print(f"Connected to system {master.target_system}, component {master.target_component}")
 
     print("Requesting data stream...")
+
     master.mav.request_data_stream_send(
         master.target_system,
         master.target_component,
@@ -52,36 +99,34 @@ def main():
         1
     )
 
-    print("Make sure:")
-    print("- propellers are removed")
-    print("- main battery is connected")
-    print("- safety switch is pressed/unlocked")
-    print("- vehicle is disarmed")
-    time.sleep(2)
+    master.set_mode_apm("GUIDED") #set Pixhawk to GUIDED mode and wait until; mode is switched
 
-    print(f"Sending motor test: motor {MOTOR_NUMBER}, {THROTTLE_PWM}us, {DURATION_SECONDS}s")
+    wait_until_mode(master, "GUIDED") #wait until Pixhawk is in GUIDED mode before arming
 
-    command = mavutil.mavlink.MAV_CMD_DO_MOTOR_TEST
+    master.arducopter_arm() #arm motors and wait until armed
 
-    master.mav.command_long_send(
+    wait_until_armed(master) #wait until Pixhawk is armed before sending takeoff command
+
+    TARGET_ALT = 5  # meters
+
+    master.mav.command_long_send( #send takeoff command to Pixhawk for TARGET_ALT meters
         master.target_system,
         master.target_component,
-        command,
+        mavutil.mavlink.MAV_CMD_NAV_TAKEOFF,
         0,
-        MOTOR_NUMBER,          # motor number: 1, 2, 3, 4
-        1,                     # throttle type: 1 = PWM in microseconds
-        THROTTLE_PWM,          # PWM value to output
-        DURATION_SECONDS,      # duration
-        0,                     # motor count, 0 = one motor
-        0,
-        0
+        0, 0, 0, 0,
+        0, 0,
+        TARGET_ALT
     )
 
-    result = wait_for_ack(master, command)
+    result = wait_for_ack(master, mavutil.mavlink.MAV_CMD_NAV_TAKEOFF)
 
-    print("Done.")
-    print(f"ACK result code: {result}")
+    if result != mavutil.mavlink.MAV_RESULT_ACCEPTED:
+        print("Takeoff command rejected!")
+        #TODO: handle rejection (e.g., retry, abort, etc.)
+        return
 
+    wait_for_takeoff(master, TARGET_ALT) #wait until drone reaches target altitude
 
 if __name__ == "__main__":
     main()
