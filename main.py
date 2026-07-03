@@ -6,6 +6,8 @@ from vision import start_video_recording
 CONNECTION = "/dev/serial0"
 BAUD = 57600
 
+armed = False
+
 
 def wait_for_ack(master, command, timeout=5):
     start = time.time()
@@ -106,6 +108,7 @@ def main():
     master.arducopter_arm() #arm motors and wait until armed
 
     wait_until_armed(master) #wait until Pixhawk is armed before sending takeoff command
+    armed = True  # Set the armed flag to True after successful arming
 
     TARGET_ALT = 2  # meters
 
@@ -123,7 +126,8 @@ def main():
 
     if result != mavutil.mavlink.MAV_RESULT_ACCEPTED:
         print("Takeoff command rejected!")
-        #TODO: handle rejection (e.g., retry, abort, etc.)
+        #abort takeoff and disarm the drone
+        master.arducopter_disarm()
         return
 
     wait_for_takeoff(master, TARGET_ALT) #wait until drone reaches target altitude
@@ -132,6 +136,7 @@ def main():
     
     while True:
         turn_output, vertical_output, forward_output = update_pid_outputs() #get PID outputs for turning and vertical movement
+        armed = master.motors_armed()  # Check if the drone is still armed
 
         print(f"Turn Output: {turn_output:.2f}, Vertical Output: {vertical_output:.2f}, Forward Output: {forward_output:.2f}")
 

@@ -3,6 +3,7 @@ from ultralytics import YOLO
 import time
 
 from pathlib import Path
+from main import armed  # Import the armed variable from main.py
 
 model = YOLO("yolov8n.pt")  # Load a pre-trained YOLOv8 model
 save_dir = Path("/home/pi/flights") #creates dirctory for saving videos if it doesn't already exist
@@ -69,7 +70,8 @@ def start_video_recording():
 
         writer.write(annotated_frame)  #Write the annotated frame to the video file
         
-        if stopCondition: #TODO: create stop condition for video recording ideally something that happens at end of drone flight such as disarming or landing
+        #get drone armed status and check if it is disarmed, if so stop recording video
+        if not armed:
             break
         
     cap.release()

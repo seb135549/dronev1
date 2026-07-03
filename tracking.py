@@ -26,6 +26,7 @@ turn_integral = 0
 
 turn_output = 0
 vertical_output = 0
+forward_output = 0
 
 DESIRED_HEIGHT = 300  # Desired distance from the person 
 
