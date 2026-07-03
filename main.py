@@ -1,6 +1,7 @@
 from pymavlink import mavutil
 import time
-from tracking import get_pid_outputs
+from tracking import update_pid_outputs
+from vision import start_video_recording
 
 CONNECTION = "/dev/serial0"
 BAUD = 57600
@@ -126,6 +127,42 @@ def main():
         return
 
     wait_for_takeoff(master, TARGET_ALT) #wait until drone reaches target altitude
+    
+    start_video_recording() #start recording video feed with bounding boxes and labels
+    
+    while True:
+        turn_output, vertical_output, forward_output = update_pid_outputs() #get PID outputs for turning and vertical movement
+
+        print(f"Turn Output: {turn_output:.2f}, Vertical Output: {vertical_output:.2f}, Forward Output: {forward_output:.2f}")
+
+        #send the turn_output as yaw_rate and vertical_output as z velocity and forward_output as x velocity to Pixhawk using SET_POSITION_TARGET_LOCAL_NED message and MAV_CMD_CONDITION_YAW
+        master.mav.set_position_target_local_ned_send(
+            0,  # time_boot_ms (not used)
+            master.target_system,
+            master.target_component,
+            mavutil.mavlink.MAV_FRAME_LOCAL_NED,  # coordinate frame
+            0b0000111111000111,  # type_mask (only velocities enabled)
+            0, 0, 0,  # x, y, z positions (not used)
+            forward_output,  # x velocity (forward/backward)
+            0,  # y velocity (left/right)
+            vertical_output,  # z velocity (up/down)
+            0, 0, 0,  # x, y, z accelerations (not supported)
+            0, 0)  # yaw, yaw_rate (not supported)
+        
+        direction = 1 if turn_output >= 0 else -1  # Determine direction based on the sign of turn_output
+        #send the turn_output as yaw_rate to Pixhawk using MAV_CMD_CONDITION_YAW
+        master.mav.command_long_send(
+            master.target_system,
+            master.target_component,
+            mavutil.mavlink.MAV_CMD_CONDITION_YAW,
+            0,  # confirmation
+            0,  # target angle (degrees)
+            abs(turn_output),  # speed (degrees/second)
+            direction,  # direction (-1: counter-clockwise, 1: clockwise)
+            0,  # relative offset (0: absolute angle, 1: relative angle)
+            0, 0, 0)  # unused parameters
+
+        time.sleep(0.1)  # Adjust the sleep time as needed
 
 if __name__ == "__main__":
     main()
