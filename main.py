@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-
 from pymavlink import mavutil
 import time
 
@@ -107,7 +105,7 @@ def main():
 
     wait_until_armed(master) #wait until Pixhawk is armed before sending takeoff command
 
-    TARGET_ALT = 5  # meters
+    TARGET_ALT = 2  # meters
 
     master.mav.command_long_send( #send takeoff command to Pixhawk for TARGET_ALT meters
         master.target_system,

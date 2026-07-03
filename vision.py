@@ -4,8 +4,6 @@ import time
 
 from pathlib import Path
 
-
-
 model = YOLO("yolov8n.pt")  # Load a pre-trained YOLOv8 model
 
 cap = cv2.VideoCapture(0)  # Open the default camera
@@ -29,8 +27,15 @@ writer = cv2.VideoWriter(
     (width, height)     #height / width of video in px 
 )
 
-while True:
+people_xy = []  # Initialize the people positions list
 
+def get_latest_boxes():
+    return people_xy
+
+def get_feed_dimensions():
+    return width, height
+
+while True:
     ret, frame = cap.read()  #Read a frame from the camera
     
     if not ret:
@@ -40,6 +45,8 @@ while True:
 
     annotated_frame = results[0].plot()  #Get the annotated frame with bounding boxes and labels
 
+    people_xy = []
+    
     for box in results[0].boxes:
 
         cls = int(box.cls[0])
@@ -54,6 +61,8 @@ while True:
         cx = int((x1 + x2) / 2) #get center of bounding box
         cy = int((y1 + y2) / 2)
 
+        people_xy.append((cx, cy))
+        
         cv2.circle(annotated_frame, (cx, cy), 5, (0,255,0), -1)
 
     writer.write(annotated_frame)  #Write the annotated frame to the video file
