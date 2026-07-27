@@ -3,7 +3,6 @@ import numpy as np
 import time
 
 from pathlib import Path
-from main import armed
 
 # Load MobileNet SSD
 net = cv2.dnn.readNetFromCaffe(
@@ -40,7 +39,7 @@ def get_feed_dimensions():
     return width, height
 
 
-def start_video_recording():
+def start_video_recording(is_armed_callback):
 
     global people_xy
     global width
@@ -69,6 +68,9 @@ def start_video_recording():
         ret, frame = cap.read()
 
         if not ret:
+            break
+        
+        if not is_armed_callback():
             break
 
         people_xy = []
@@ -137,9 +139,6 @@ def start_video_recording():
             )
 
         writer.write(frame)
-
-        if not armed:
-            break
 
     cap.release()
     writer.release()

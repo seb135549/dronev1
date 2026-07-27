@@ -132,7 +132,7 @@ def main():
 
     wait_for_takeoff(master, TARGET_ALT) #wait until drone reaches target altitude
     
-    start_video_recording() #start recording video feed with bounding boxes and labels
+    start_video_recording(lambda: armed) #start recording video feed with bounding boxes and labels
     
     while True:
         turn_output, vertical_output, forward_output = update_pid_outputs() #get PID outputs for turning and vertical movement
