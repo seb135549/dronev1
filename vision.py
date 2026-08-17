@@ -39,7 +39,7 @@ PERSON_CLASS = 0
 # VIDEO STORAGE
 # ============================================================
 
-save_dir = Path("/home/pi/flights")
+save_dir = Path("/home/admin/Videos")
 save_dir.mkdir(exist_ok=True)
 
 filename = save_dir / f"{time.strftime('%Y%m%d_%H%M%S')}.mp4"
