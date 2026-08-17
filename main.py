@@ -83,15 +83,15 @@ def wait_for_takeoff(master, target_altitude, tolerance=0.5):
 
 
 def main():
-    print("Connecting to Pixhawk...")
+    print("Connecting to Pixhawk...", flush=True)
     master = mavutil.mavlink_connection(CONNECTION, baud=BAUD)
 
-    print("Waiting for heartbeat...")
+    print("Waiting for heartbeat...", flush=True)
     master.wait_heartbeat()
 
-    print(f"Connected to system {master.target_system}, component {master.target_component}")
+    print(f"Connected to system {master.target_system}, component {master.target_component}", flush=True)
 
-    print("Requesting data stream...")
+    print("Requesting data stream...", flush=True)
 
     master.mav.request_data_stream_send(
         master.target_system,
