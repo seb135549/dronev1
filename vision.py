@@ -9,17 +9,20 @@ from pathlib import Path
 # MODEL
 # ============================================================
 
-MODEL_PATH = "/home/pi/dronev1/yolov5n.onnx"
+MODEL_PATH = "/home/pi/dronev1/ssd_mobilenet_v1_12.onnx"
+
+print("Loading SSD-MobileNet model...")
 
 net = cv2.dnn.readNetFromONNX(MODEL_PATH)
 
-# Use CPU
 net.setPreferableBackend(cv2.dnn.DNN_BACKEND_OPENCV)
 net.setPreferableTarget(cv2.dnn.DNN_TARGET_CPU)
 
+print("SSD-MobileNet model loaded.")
+
 
 # ============================================================
-# COCO CLASSES
+# COCO CLASS NAMES
 # ============================================================
 
 CLASSES = [
@@ -105,17 +108,17 @@ CLASSES = [
     "toothbrush"
 ]
 
-PERSON_CLASS = 0
+PERSON_CLASS = 1
 
 
 # ============================================================
 # SETTINGS
 # ============================================================
 
-INPUT_SIZE = 320
+CONFIDENCE_THRESHOLD = 0.45
 
-CONFIDENCE_THRESHOLD = 0.40
-NMS_THRESHOLD = 0.45
+INPUT_WIDTH = 300
+INPUT_HEIGHT = 300
 
 
 # ============================================================
@@ -162,6 +165,11 @@ def start_video_recording(is_armed_callback):
 
     cap = cv2.VideoCapture(0)
 
+    if not cap.isOpened():
+        print("ERROR: Could not open camera.")
+        return
+
+    # 640x480 is a good starting point for the Pi 4
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
 
@@ -172,7 +180,7 @@ def start_video_recording(is_armed_callback):
 
 
     # --------------------------------------------------------
-    # VIDEO FPS
+    # FPS
     # --------------------------------------------------------
 
     fps = cap.get(cv2.CAP_PROP_FPS)
@@ -208,7 +216,7 @@ def start_video_recording(is_armed_callback):
         ret, frame = cap.read()
 
         if not ret:
-            print("Failed to read camera frame.")
+            print("ERROR: Failed to read camera frame.")
             break
 
 
@@ -217,89 +225,70 @@ def start_video_recording(is_armed_callback):
 
 
         # ----------------------------------------------------
-        # PREPARE IMAGE FOR YOLOv5
+        # CREATE INPUT BLOB
         # ----------------------------------------------------
 
         blob = cv2.dnn.blobFromImage(
             frame,
-            1 / 255.0,
-            (INPUT_SIZE, INPUT_SIZE),
+            scalefactor=1.0 / 127.5,
+            size=(INPUT_WIDTH, INPUT_HEIGHT),
+            mean=(127.5, 127.5, 127.5),
             swapRB=True,
             crop=False
         )
 
+
+        # ----------------------------------------------------
+        # RUN MODEL
+        # ----------------------------------------------------
+
         net.setInput(blob)
 
-
-        # ----------------------------------------------------
-        # RUN NEURAL NETWORK
-        # ----------------------------------------------------
-
-        outputs = net.forward()
-
-
-        # ----------------------------------------------------
-        # YOLOv5 OUTPUT
-        # ----------------------------------------------------
-
-        detections = outputs[0]
-
-
-        boxes = []
-        confidences = []
+        detections = net.forward()
 
 
         # ----------------------------------------------------
         # PROCESS DETECTIONS
         # ----------------------------------------------------
 
-        for detection in detections:
+        # SSD-MobileNet output:
+        #
+        # [image_id, class_id, confidence,
+        #  x_min, y_min, x_max, y_max]
+        #
 
-            # Objectness score
-            objectness = float(detection[4])
+        for detection in detections[0, 0]:
 
-            if objectness < CONFIDENCE_THRESHOLD:
-                continue
+            class_id = int(detection[1])
 
-
-            # Class probabilities
-            class_scores = detection[5:]
-
-            class_id = np.argmax(class_scores)
-
-            class_confidence = float(class_scores[class_id])
-
-            confidence = objectness * class_confidence
+            confidence = float(detection[2])
 
 
-            # Only interested in people
+            # Ignore anything that isn't a person
             if class_id != PERSON_CLASS:
                 continue
 
 
+            # Ignore low-confidence detections
             if confidence < CONFIDENCE_THRESHOLD:
                 continue
 
 
             # ------------------------------------------------
-            # CONVERT BOX
+            # CONVERT NORMALIZED COORDINATES TO PIXELS
             # ------------------------------------------------
 
-            center_x = float(detection[0]) * width
-            center_y = float(detection[1]) * height
+            x1 = int(detection[3] * width)
+            y1 = int(detection[4] * height)
 
-            box_width = float(detection[2]) * width
-            box_height = float(detection[3]) * height
-
-
-            x1 = int(center_x - box_width / 2)
-            y1 = int(center_y - box_height / 2)
-
-            x2 = int(center_x + box_width / 2)
-            y2 = int(center_y + box_height / 2)
+            x2 = int(detection[5] * width)
+            y2 = int(detection[6] * height)
 
 
-            # Keep inside image
+            # ------------------------------------------------
+            # KEEP BOX INSIDE IMAGE
+            # ------------------------------------------------
+
             x1 = max(0, min(x1, width - 1))
             y1 = max(0, min(y1, height - 1))
 
@@ -307,108 +296,79 @@ def start_video_recording(is_armed_callback):
             y2 = max(0, min(y2, height - 1))
 
 
-            boxes.append(
-                [x1, y1, x2 - x1, y2 - y1]
+            # ------------------------------------------------
+            # CENTER OF PERSON
+            # ------------------------------------------------
+
+            cx = int((x1 + x2) / 2)
+            cy = int((y1 + y2) / 2)
+
+
+            # ------------------------------------------------
+            # STORE DETECTION
+            #
+            # Same format as your original YOLO program:
+            #
+            # x1, y1, x2, y2, cx, cy
+            # ------------------------------------------------
+
+            people_xy.append(
+                (
+                    x1,
+                    y1,
+                    x2,
+                    y2,
+                    cx,
+                    cy
+                )
             )
 
-            confidences.append(confidence)
+
+            # ------------------------------------------------
+            # DRAW BOUNDING BOX
+            # ------------------------------------------------
+
+            cv2.rectangle(
+                frame,
+                (x1, y1),
+                (x2, y2),
+                (0, 255, 0),
+                2
+            )
+
+
+            # ------------------------------------------------
+            # DRAW CENTER POINT
+            # ------------------------------------------------
+
+            cv2.circle(
+                frame,
+                (cx, cy),
+                5,
+                (0, 0, 255),
+                -1
+            )
+
+
+            # ------------------------------------------------
+            # DRAW LABEL
+            # ------------------------------------------------
+
+            label = f"Person {confidence:.2f}"
+
+            cv2.putText(
+                frame,
+                label,
+                (x1, max(y1 - 10, 20)),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.5,
+                (0, 255, 0),
+                2
+            )
 
 
         # ----------------------------------------------------
-        # NON-MAXIMUM SUPPRESSION
-        # ----------------------------------------------------
-
-        indices = cv2.dnn.NMSBoxes(
-            boxes,
-            confidences,
-            CONFIDENCE_THRESHOLD,
-            NMS_THRESHOLD
-        )
-
-
-        # ----------------------------------------------------
-        # STORE PEOPLE
-        # ----------------------------------------------------
-
-        if len(indices) > 0:
-
-            for index in indices:
-
-                # OpenCV versions can return different formats
-                if isinstance(index, (list, tuple, np.ndarray)):
-                    index = index[0]
-
-                index = int(index)
-
-                x, y, w, h = boxes[index]
-
-                x2 = x + w
-                y2 = y + h
-
-
-                # Center of person
-                cx = int((x + x2) / 2)
-                cy = int((y + y2) / 2)
-
-
-                # SAME FORMAT AS YOUR OLD YOLO PROGRAM
-                people_xy.append(
-                    (
-                        x,
-                        y,
-                        x2,
-                        y2,
-                        cx,
-                        cy
-                    )
-                )
-
-
-                # ------------------------------------------------
-                # DRAW BOX
-                # ------------------------------------------------
-
-                cv2.rectangle(
-                    frame,
-                    (x, y),
-                    (x2, y2),
-                    (0, 255, 0),
-                    2
-                )
-
-
-                # ------------------------------------------------
-                # DRAW CENTER
-                # ------------------------------------------------
-
-                cv2.circle(
-                    frame,
-                    (cx, cy),
-                    5,
-                    (0, 0, 255),
-                    -1
-                )
-
-
-                # ------------------------------------------------
-                # DRAW LABEL
-                # ------------------------------------------------
-
-                label = f"Person {confidences[index]:.2f}"
-
-                cv2.putText(
-                    frame,
-                    label,
-                    (x, max(y - 10, 20)),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.5,
-                    (0, 255, 0),
-                    2
-                )
-
-
-        # ----------------------------------------------------
-        # WRITE VIDEO
+        # WRITE FRAME
         # ----------------------------------------------------
 
         writer.write(frame)
