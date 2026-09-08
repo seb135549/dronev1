@@ -85,6 +85,7 @@ def wait_for_takeoff(master, target_altitude, tolerance=0.5):
 
 
 def main():
+    global armed
     print("Connecting to Pixhawk...", flush=True)
     master = mavutil.mavlink_connection(CONNECTION, baud=BAUD)
 
