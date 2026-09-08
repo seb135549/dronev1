@@ -1,11 +1,13 @@
 from pymavlink import mavutil
 import time
+import sys
 from tracking import update_pid_outputs
 from vision import start_video_recording
 
 CONNECTION = "/dev/serial0"
 BAUD = 57600
 
+ARMWAIT_TIMEOUT = 5  # seconds
 armed = False
 
 
@@ -105,11 +107,49 @@ def main():
 
     wait_until_mode(master, "GUIDED") #wait until Pixhawk is in GUIDED mode before arming
 
-    master.arducopter_arm() #arm motors and wait until armed
+    print("Sending ARM command...", flush=True)
 
-    wait_until_armed(master) #wait until Pixhawk is armed before sending takeoff command
-    armed = True  # Set the armed flag to True after successful arming
+    master.mav.command_long_send(
+        master.target_system,
+        master.target_component,
+        mavutil.mavlink.MAV_CMD_COMPONENT_ARM_DISARM,
+        0,
+        1,  # 1 = arm
+        0,  # force = 0
+        0, 0, 0, 0, 0
+    )
 
+    print("ARM command sent. Waiting for response...", flush=True)
+
+    deadline = time.time() + ARMWAIT_TIMEOUT
+
+    while time.time() < deadline:
+        msg = master.recv_match(
+            type=['COMMAND_ACK', 'STATUSTEXT', 'HEARTBEAT'],
+            blocking=True,
+            timeout=0.5
+        )
+
+        if msg is None:
+            continue
+
+        print(f"Pixhawk: {msg}", flush=True)
+
+        if msg.get_type() == "COMMAND_ACK":
+            if msg.command == mavutil.mavlink.MAV_CMD_COMPONENT_ARM_DISARM:
+                if msg.result == mavutil.mavlink.MAV_RESULT_ACCEPTED:
+                    print("ARM COMMAND ACCEPTED", flush=True)
+                else:
+                    print(f"ARM COMMAND REJECTED: result={msg.result}", flush=True)
+
+        if msg.get_type() == "HEARTBEAT":
+            if msg.base_mode & mavutil.mavlink.MAV_MODE_FLAG_SAFETY_ARMED:
+                print("PIXHAWK IS ARMED", flush=True)
+                armed = True
+                break
+
+    if not armed:
+        print("FAILED TO ARM WITHIN 5 SECONDS", flush=True)
     TARGET_ALT = 2  # meters
 
     master.mav.command_long_send( #send takeoff command to Pixhawk for TARGET_ALT meters
