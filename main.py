@@ -2,13 +2,14 @@ from pymavlink import mavutil
 import time
 import sys
 from tracking import update_pid_outputs
-from vision import start_video_recording
+from vision import start_video_recording, people_xy
 
 CONNECTION = "/dev/serial0"
 BAUD = 57600
 
 ARMWAIT_TIMEOUT = 5  # seconds
 armed = False
+FLIGHT_TIMEOUT = 5 # seconds
 
 
 def wait_for_ack(master, command, timeout=5):
@@ -174,6 +175,8 @@ def main():
     wait_for_takeoff(master, TARGET_ALT) #wait until drone reaches target altitude
     
     start_video_recording(lambda: armed) #start recording video feed with bounding boxes and labels
+
+    flight_timeout = 0
     
     while True:
         turn_output, vertical_output, forward_output = update_pid_outputs() #get PID outputs for turning and vertical movement
@@ -207,6 +210,24 @@ def main():
             direction,  # direction (-1: counter-clockwise, 1: clockwise)
             0,  # relative offset (0: absolute angle, 1: relative angle)
             0, 0, 0)  # unused parameters
+
+        #if no people are detected for more than FLIGHT_TIMEOUT seconds, disarm the drone and exit the loop
+        if people_xy is None:
+            flight_timeout += 0.1
+            if flight_timeout >= FLIGHT_TIMEOUT:
+                master.mav.command_long_send(
+                        master.target_system,
+                        master.target_component,
+                        mavutil.mavlink.MAV_CMD_COMPONENT_ARM_DISARM,
+                        0,
+                        0,  # 0 = disarm
+                        0,  # force = 0
+                        0, 0, 0, 0, 0
+                    )
+                
+                break
+        else:
+            flight_timeout = 0
 
         time.sleep(0.1)  # Adjust the sleep time as needed
 
