@@ -121,37 +121,6 @@ def main():
         0, 0, 0, 0, 0
     )
 
-    # print("ARM command sent. Waiting for response...", flush=True)
-
-    # deadline = time.time() + ARMWAIT_TIMEOUT
-
-    # while time.time() < deadline:
-    #     msg = master.recv_match(
-    #         type=['COMMAND_ACK', 'STATUSTEXT', 'HEARTBEAT'],
-    #         blocking=True,
-    #         timeout=0.5
-    #     )
-
-    #     if msg is None:
-    #         continue
-
-    #     print(f"Pixhawk: {msg}", flush=True)
-
-    #     if msg.get_type() == "COMMAND_ACK":
-    #         if msg.command == mavutil.mavlink.MAV_CMD_COMPONENT_ARM_DISARM:
-    #             if msg.result == mavutil.mavlink.MAV_RESULT_ACCEPTED:
-    #                 print("ARM COMMAND ACCEPTED", flush=True)
-    #             else:
-    #                 print(f"ARM COMMAND REJECTED: result={msg.result}", flush=True)
-
-    #     if msg.get_type() == "HEARTBEAT":
-    #         if msg.base_mode & mavutil.mavlink.MAV_MODE_FLAG_SAFETY_ARMED:
-    #             print("PIXHAWK IS ARMED", flush=True)
-    #             armed = True
-    #             break
-
-    # if not armed:
-    #     print("FAILED TO ARM WITHIN 5 SECONDS", flush=True)
     TARGET_ALT = 2  # meters
 
     master.mav.command_long_send( #send takeoff command to Pixhawk for TARGET_ALT meters
