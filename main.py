@@ -211,10 +211,20 @@ def main():
             0,  # relative offset (0: absolute angle, 1: relative angle)
             0, 0, 0)  # unused parameters
 
-        #if no people are detected for more than FLIGHT_TIMEOUT seconds, disarm the drone and exit the loop
+        #if no people are detected for more than FLIGHT_TIMEOUT seconds, return to home,disarm the drone and exit the loop
         if people_xy is None:
             flight_timeout += 0.1
             if flight_timeout >= FLIGHT_TIMEOUT:
+                #return to home and disarm the drone
+                print("No people detected for 5 seconds. Returning to home and disarming the drone.")
+                master.mav.command_long_send(
+                    master.target_system,
+                    master.target_component,
+                    mavutil.mavlink.MAV_CMD_NAV_RETURN_TO_LAUNCH,
+                    0,
+                    0, 0, 0, 0, 0, 0, 0
+                )
+
                 master.mav.command_long_send(
                         master.target_system,
                         master.target_component,
