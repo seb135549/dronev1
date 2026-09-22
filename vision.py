@@ -4,6 +4,10 @@ import time
 
 from pathlib import Path
 
+#Constants
+
+WIDTH = 640 #camera width px
+HEIGHT = 480 #camera height px
 
 # ============================================================
 # MODEL
@@ -85,8 +89,8 @@ def start_video_recording(is_armed_callback):
 
     # 640x480 keeps the camera workload reasonable
     # for the Raspberry Pi 4B.
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, WIDTH)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, HEIGHT)
 
     width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
