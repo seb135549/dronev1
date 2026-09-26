@@ -1,36 +1,21 @@
+```python
 import cv2
 import numpy as np
 import time
 
 from pathlib import Path
-
-#Constants
-
-WIDTH = 640 #camera width px
-HEIGHT = 480 #camera height px
-
-# ============================================================
-# MODEL
-# ============================================================
-
-MODEL_PATH = Path(__file__).parent / "yolov8n.onnx"
-
-print("Loading YOLOv8n ONNX model...")
-
-net = cv2.dnn.readNetFromONNX(str(MODEL_PATH))
-
-# Use CPU
-net.setPreferableBackend(cv2.dnn.DNN_BACKEND_OPENCV)
-net.setPreferableTarget(cv2.dnn.DNN_TARGET_CPU)
-
-print("YOLOv8n ONNX model loaded successfully.")
+from picamera2 import Picamera2
 
 
 # ============================================================
-# YOLO SETTINGS
+# CONSTANTS
 # ============================================================
 
-INPUT_SIZE = 320
+WIDTH = 640
+HEIGHT = 480
+
+# YOLOv8n standard ONNX input size
+INPUT_SIZE = 640
 
 CONFIDENCE_THRESHOLD = 0.40
 NMS_THRESHOLD = 0.45
@@ -40,13 +25,21 @@ PERSON_CLASS = 0
 
 
 # ============================================================
-# VIDEO STORAGE
+# MODEL
 # ============================================================
 
-save_dir = Path("/home/admin/Videos")
-save_dir.mkdir(exist_ok=True)
+MODEL_PATH = Path(__file__).parent / "yolov8n.onnx"
 
-filename = save_dir / f"{time.strftime('%Y%m%d_%H%M%S')}.mp4"
+print("Loading YOLOv8n ONNX model...")
+print(f"Model: {MODEL_PATH}")
+
+net = cv2.dnn.readNetFromONNX(str(MODEL_PATH))
+
+# CPU
+net.setPreferableBackend(cv2.dnn.DNN_BACKEND_OPENCV)
+net.setPreferableTarget(cv2.dnn.DNN_TARGET_CPU)
+
+print("YOLOv8n ONNX model loaded successfully.")
 
 
 # ============================================================
@@ -55,8 +48,8 @@ filename = save_dir / f"{time.strftime('%Y%m%d_%H%M%S')}.mp4"
 
 people_xy = []
 
-width = 0
-height = 0
+width = WIDTH
+height = HEIGHT
 
 
 def get_latest_boxes():
@@ -68,7 +61,191 @@ def get_feed_dimensions():
 
 
 # ============================================================
-# VIDEO RECORDING
+# VIDEO STORAGE
+# ============================================================
+
+save_dir = Path("/home/admin/Videos")
+save_dir.mkdir(parents=True, exist_ok=True)
+
+filename = save_dir / f"{time.strftime('%Y%m%d_%H%M%S')}.mp4"
+
+
+# ============================================================
+# PICAMERA2 SETUP
+# ============================================================
+
+def create_camera():
+
+    print("Starting Pi Camera 2...")
+
+    picam2 = Picamera2()
+
+    config = picam2.create_video_configuration(
+        main={
+            "size": (WIDTH, HEIGHT),
+            "format": "RGB888"
+        },
+        controls={
+            "FrameRate": 30
+        }
+    )
+
+    picam2.configure(config)
+
+    picam2.start()
+
+    # Give the camera a moment to start
+    time.sleep(2)
+
+    print(f"Pi Camera 2 started: {WIDTH}x{HEIGHT}")
+
+    return picam2
+
+
+# ============================================================
+# YOLO INFERENCE
+# ============================================================
+
+def run_yolo(frame):
+
+    """
+    Runs YOLOv8n inference on one OpenCV frame.
+
+    Returns:
+        boxes
+        confidences
+    """
+
+    # --------------------------------------------------------
+    # CREATE YOLO INPUT
+    # --------------------------------------------------------
+
+    blob = cv2.dnn.blobFromImage(
+        frame,
+        scalefactor=1.0 / 255.0,
+        size=(INPUT_SIZE, INPUT_SIZE),
+        swapRB=True,
+        crop=False
+    )
+
+    net.setInput(blob)
+
+    # --------------------------------------------------------
+    # RUN INFERENCE
+    # --------------------------------------------------------
+
+    outputs = net.forward()
+
+    # --------------------------------------------------------
+    # HANDLE YOLOv8 OUTPUT
+    #
+    # Normal YOLOv8 output:
+    #
+    # (1, 84, 8400)
+    #
+    # 84 =
+    #   4 box values
+    #   80 COCO class scores
+    # --------------------------------------------------------
+
+    if isinstance(outputs, tuple):
+        output = outputs[0]
+    else:
+        output = outputs
+
+    if output.ndim == 3:
+        output = output[0]
+
+    # Convert:
+    #
+    # (84, 8400)
+    #
+    # into:
+    #
+    # (8400, 84)
+    #
+    if output.shape[0] < output.shape[1]:
+        output = output.transpose()
+
+    boxes = []
+    confidences = []
+
+    # --------------------------------------------------------
+    # PROCESS DETECTIONS
+    # --------------------------------------------------------
+
+    for detection in output:
+
+        # First four values:
+        #
+        # x center
+        # y center
+        # width
+        # height
+
+        x_center = float(detection[0])
+        y_center = float(detection[1])
+
+        box_width = float(detection[2])
+        box_height = float(detection[3])
+
+        class_scores = detection[4:]
+
+        # Find class with highest confidence
+        class_id = int(np.argmax(class_scores))
+        class_confidence = float(class_scores[class_id])
+
+        # Only detect people
+        if class_id != PERSON_CLASS:
+            continue
+
+        if class_confidence < CONFIDENCE_THRESHOLD:
+            continue
+
+        # ----------------------------------------------------
+        # SCALE FROM YOLO INPUT TO CAMERA
+        # ----------------------------------------------------
+
+        x_center *= width / INPUT_SIZE
+        y_center *= height / INPUT_SIZE
+
+        box_width *= width / INPUT_SIZE
+        box_height *= height / INPUT_SIZE
+
+        # ----------------------------------------------------
+        # CONVERT CENTER FORMAT TO CORNERS
+        # ----------------------------------------------------
+
+        x1 = int(x_center - box_width / 2)
+        y1 = int(y_center - box_height / 2)
+
+        x2 = int(x_center + box_width / 2)
+        y2 = int(y_center + box_height / 2)
+
+        # ----------------------------------------------------
+        # CLAMP TO IMAGE
+        # ----------------------------------------------------
+
+        x1 = max(0, min(x1, width - 1))
+        y1 = max(0, min(y1, height - 1))
+
+        x2 = max(0, min(x2, width - 1))
+        y2 = max(0, min(y2, height - 1))
+
+        box_w = x2 - x1
+        box_h = y2 - y1
+
+        if box_w <= 0 or box_h <= 0:
+            continue
+
+        boxes.append([x1, y1, box_w, box_h])
+        confidences.append(class_confidence)
+
+    return boxes, confidences
+
+
+# ============================================================
+# VIDEO RECORDING + DETECTION
 # ============================================================
 
 def start_video_recording(is_armed_callback):
@@ -81,38 +258,16 @@ def start_video_recording(is_armed_callback):
     # CAMERA
     # --------------------------------------------------------
 
-    cap = cv2.VideoCapture(0)
+    picam2 = create_camera()
 
-    if not cap.isOpened():
-        print("ERROR: Could not open camera.")
-        return
-
-    # 640x480 keeps the camera workload reasonable
-    # for the Raspberry Pi 4B.
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, WIDTH)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, HEIGHT)
-
-    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-
-    print(f"Camera resolution: {width}x{height}")
-
-
-    # --------------------------------------------------------
-    # FPS
-    # --------------------------------------------------------
-
-    fps = cap.get(cv2.CAP_PROP_FPS)
-
-    if fps <= 0:
-        fps = 30
-
-    print(f"Camera FPS: {fps}")
-
+    width = WIDTH
+    height = HEIGHT
 
     # --------------------------------------------------------
     # VIDEO WRITER
     # --------------------------------------------------------
+
+    fps = 30
 
     fourcc = cv2.VideoWriter_fourcc(*"mp4v")
 
@@ -123,6 +278,11 @@ def start_video_recording(is_armed_callback):
         (width, height)
     )
 
+    if not writer.isOpened():
+        print("ERROR: Could not open video writer.")
+        picam2.stop()
+        return
+
     print(f"Recording video to: {filename}")
 
 
@@ -132,155 +292,45 @@ def start_video_recording(is_armed_callback):
 
     while True:
 
-        ret, frame = cap.read()
+        # ----------------------------------------------------
+        # GET FRAME FROM PICAMERA2
+        # ----------------------------------------------------
 
-        if not ret:
+        frame = picam2.capture_array()
+
+        if frame is None:
             print("ERROR: Could not read frame.")
             break
 
-
-        # Clear detections from previous frame
-        people_xy = []
-
-
-        # ----------------------------------------------------
-        # CREATE YOLO INPUT
-        # ----------------------------------------------------
-
-        blob = cv2.dnn.blobFromImage(
+        # Picamera2 is configured for RGB888.
+        #
+        # OpenCV normally works with BGR.
+        #
+        frame = cv2.cvtColor(
             frame,
-            scalefactor=1 / 255.0,
-            size=(INPUT_SIZE, INPUT_SIZE),
-            swapRB=True,
-            crop=False
+            cv2.COLOR_RGB2BGR
         )
 
-        net.setInput(blob)
+        # ----------------------------------------------------
+        # CLEAR PREVIOUS DETECTIONS
+        # ----------------------------------------------------
 
+        people_xy = []
 
         # ----------------------------------------------------
         # RUN YOLO
         # ----------------------------------------------------
 
-        outputs = net.forward()
+        try:
 
+            boxes, confidences = run_yolo(frame)
 
-        # ----------------------------------------------------
-        # GET OUTPUT
-        # ----------------------------------------------------
+        except cv2.error as e:
 
-        output = outputs[0]
+            print("YOLO OpenCV inference error:")
+            print(e)
 
-        # YOLOv8 OpenCV output is normally:
-        #
-        # (1, 84, 8400)
-        #
-        # We want:
-        #
-        # (8400, 84)
-        #
-        if len(output.shape) == 3:
-            output = output[0]
-
-        if output.shape[0] < output.shape[1]:
-            output = output.transpose()
-
-
-        # ----------------------------------------------------
-        # DETECTIONS
-        # ----------------------------------------------------
-
-        boxes = []
-        confidences = []
-
-
-        for detection in output:
-
-            # YOLOv8 format:
-            #
-            # x
-            # y
-            # width
-            # height
-            # class scores...
-            #
-
-            x_center = detection[0]
-            y_center = detection[1]
-
-            box_width = detection[2]
-            box_height = detection[3]
-
-            class_scores = detection[4:]
-
-
-            # ------------------------------------------------
-            # FIND BEST CLASS
-            # ------------------------------------------------
-
-            class_id = int(np.argmax(class_scores))
-
-            class_confidence = float(
-                class_scores[class_id]
-            )
-
-
-            # ------------------------------------------------
-            # ONLY LOOK FOR PEOPLE
-            # ------------------------------------------------
-
-            if class_id != PERSON_CLASS:
-                continue
-
-
-            if class_confidence < CONFIDENCE_THRESHOLD:
-                continue
-
-
-            # ------------------------------------------------
-            # SCALE BOX TO CAMERA RESOLUTION
-            # ------------------------------------------------
-
-            x_center *= width / INPUT_SIZE
-            y_center *= height / INPUT_SIZE
-
-            box_width *= width / INPUT_SIZE
-            box_height *= height / INPUT_SIZE
-
-
-            # Convert center/width/height
-            # into corner coordinates
-
-            x1 = int(x_center - box_width / 2)
-            y1 = int(y_center - box_height / 2)
-
-            x2 = int(x_center + box_width / 2)
-            y2 = int(y_center + box_height / 2)
-
-
-            # ------------------------------------------------
-            # CLAMP BOX
-            # ------------------------------------------------
-
-            x1 = max(0, min(x1, width - 1))
-            y1 = max(0, min(y1, height - 1))
-
-            x2 = max(0, min(x2, width - 1))
-            y2 = max(0, min(y2, height - 1))
-
-
-            # ------------------------------------------------
-            # STORE BOX
-            # ------------------------------------------------
-
-            boxes.append(
-                [x1, y1, x2 - x1, y2 - y1]
-            )
-
-            confidences.append(
-                class_confidence
-            )
-
+            break
 
         # ----------------------------------------------------
         # NON-MAXIMUM SUPPRESSION
@@ -293,7 +343,6 @@ def start_video_recording(is_armed_callback):
             NMS_THRESHOLD
         )
 
-
         # ----------------------------------------------------
         # PROCESS FINAL DETECTIONS
         # ----------------------------------------------------
@@ -302,7 +351,13 @@ def start_video_recording(is_armed_callback):
 
             for index in indices:
 
-                # Handle different OpenCV versions
+                # OpenCV versions can return:
+                #
+                # [0]
+                # [[0]]
+                # np.array([0])
+                #
+
                 if isinstance(
                     index,
                     (list, tuple, np.ndarray)
@@ -311,12 +366,10 @@ def start_video_recording(is_armed_callback):
 
                 index = int(index)
 
-
                 x, y, w, h = boxes[index]
 
                 x2 = x + w
                 y2 = y + h
-
 
                 # ------------------------------------------------
                 # CENTER
@@ -325,11 +378,10 @@ def start_video_recording(is_armed_callback):
                 cx = int((x + x2) / 2)
                 cy = int((y + y2) / 2)
 
-
                 # ------------------------------------------------
                 # SAVE DETECTION
                 #
-                # Same format as your original YOLO code:
+                # Same format as your old code:
                 #
                 # x1, y1, x2, y2, cx, cy
                 # ------------------------------------------------
@@ -345,7 +397,6 @@ def start_video_recording(is_armed_callback):
                     )
                 )
 
-
                 # ------------------------------------------------
                 # DRAW BOUNDING BOX
                 # ------------------------------------------------
@@ -358,7 +409,6 @@ def start_video_recording(is_armed_callback):
                     2
                 )
 
-
                 # ------------------------------------------------
                 # DRAW CENTER
                 # ------------------------------------------------
@@ -370,7 +420,6 @@ def start_video_recording(is_armed_callback):
                     (0, 0, 255),
                     -1
                 )
-
 
                 # ------------------------------------------------
                 # DRAW LABEL
@@ -391,13 +440,11 @@ def start_video_recording(is_armed_callback):
                     2
                 )
 
-
         # ----------------------------------------------------
         # WRITE VIDEO
         # ----------------------------------------------------
 
         writer.write(frame)
-
 
         # ----------------------------------------------------
         # CHECK ARMED STATUS
@@ -417,7 +464,10 @@ def start_video_recording(is_armed_callback):
     # CLEANUP
     # ========================================================
 
-    cap.release()
+    print("Stopping Pi Camera 2...")
+
+    picam2.stop()
+
     writer.release()
 
     print("Video recording stopped.")
